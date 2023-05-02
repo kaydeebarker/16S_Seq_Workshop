@@ -2,18 +2,23 @@
 title: "16S Amplicon Sequencing Workshop with Dr. Henry Birt"
 author: "Kaydee S. Barker"
 date: '2023-05-02'
-output: html_document
+output:
+  pdf_document: default
+  html_document: default
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+
 ```
 
-## Workshop
+## Workshop Background
 
 This workshop given by Dr. Henry Birt for the Microbiome Network at the University of Manchester...
 
-```{r setup}
+## Processing Raw Data to Analyze
+
+```{r}
 #install if needed
 #BiocManager::install("phyloseq")
 #BiocManager::install("DECIPHER")
@@ -27,8 +32,8 @@ library(phangorn)
 library(DECIPHER)
 library(phyloseq)
 
-download.file('https://mothur.s3.us-east-2.amazonaws.com/wiki/miseqsopdata.zip', destfile = "data/miseqsopdata.zip")
-unzip("data/miseqsopdata.zip", exdir = "data/")
+#download.file('https://mothur.s3.us-east-2.amazonaws.com/wiki/miseqsopdata.zip', destfile = "data/miseqsopdata.zip")
+#unzip("data/miseqsopdata.zip", exdir = "data/")
 
 path <- "data/MiSeq_SOP/"
 files <- list.files("data/MiSeq_SOP/")
@@ -57,9 +62,9 @@ names(filtRs) <- sample.names
 
 ```
 
-## Read quality profiles
+### Read quality profiles
 
-### Inspect the front and reverse read quality profiles
+#### Inspect the front and reverse read quality profiles
 
 ```{r, fig.cap="Heat map of the frequency of each quality score at each base position in forward reads. The mean quality score at each position is shown by the green line,and the quartiles of the quality score distribution by the orange lines. The red line shows the scaled proportion of reads that extend to at least that position."}
 
@@ -75,7 +80,7 @@ plotQualityProfile(fl = fnRs)
 
 ```
 
-### Filter and trim, then inspect read quality profiles again
+#### Filter and trim, then inspect read quality profiles again
 
 Here we will trim off data with a quality score less than 20.
 
@@ -102,7 +107,7 @@ plotQualityProfile(fl = filtRs)
 
 ```
 
-### Identify errors
+#### Identify errors
 
 ```{r, fig.cap="Scatterplot and line for expected and actual reads for forward reads. The black line shows the estimated error rates after convergence of the machine-learning algorithm. The red line shows the error rates expected under the nominal definition of the Q-score."}
 
@@ -119,7 +124,8 @@ errR <- learnErrors(filtRs, nbases = 1e8, multithread = TRUE)
 plotErrors(errR, nominalQ = TRUE)
 
 ```
-## Sample inference
+
+### Sample inference
 
 DADA2 uses a machine learning algorithm to infer unique sequences, or amplicon sequence variants (ASVs) from reads.
 
@@ -132,7 +138,7 @@ dadaRs <- dada(filtRs, err = errR, multithread = TRUE)
 
 ```
 
-## Merge forward and reverse reads
+### Merge forward and reverse reads, remove chimeras
 
 ```{r}
 
@@ -153,23 +159,97 @@ nchar(colnames(seqtab_orig)) #show number of characters in each column
 seqtab <- seqtab_orig[,nchar(colnames(seqtab_orig)) == 225] #keep only columns with 225
 dim(seqtab) #look at dimensions of df
 
-
-```
-
-## Remove chimeras and assign taxonomy
-
-```{r}
-
 #Remove chimeras
 seqtab.nochim <- removeBimeraDenovo(seqtab, method="consensus", multithread=TRUE, verbose=TRUE)
 dim(seqtab.nochim) #look at dimensions of df
 
+```
+
+### Assign taxonomy
+
+```{r}
+
 #Download Silva reference database
 #download.file("https://zenodo.org/record/4587955/files/silva_nr99_v138.1_train_set.fa.gz?download=1", destfile = file.path(path, "silva_nr99_v138.1_train_set.fa.gz"), method = "libcurl")
 
-# implements the RDP Naive Bayesian Classifier algorithm described in Wang et al. Applied and Environmental Microbiology 2007, 
-taxa <- assignTaxonomy(seqtab.nochim, "silva_nr99_v138.1_train_set.fa.gz", multithread=TRUE) 
-dim(seqtab.nochim) #look at dimensions of df
+#Implements the RDP Naive Bayesian Classifier algorithm described in Wang et al. Applied and Environmental Microbiology 2007, 
+taxa <- assignTaxonomy(seqtab.nochim, "data/MiSeq_SOP/silva_nr99_v138.1_train_set.fa.gz", multithread=TRUE) 
 
-taxa
+table(nchar(getSequences(seqtab.nochim)))
+
+getN <- function(x) sum(getUniques(x)) #create function to get taxa names
+
+track <- cbind(out, sapply(dadaFs, getN), sapply(dadaRs, getN), 
+               sapply(mergers, getN), rowSums(seqtab_orig), 
+               rowSums(seqtab), rowSums(seqtab.nochim))
+# If processing a single sample, remove the sapply calls: e.g. replace
+# sapply(dadaFs, getN) with getN(dadaFs)
+colnames(track) <- c("input", "filtered", "denoisedF", "denoisedR", "merged", 
+                     "seqtaborig", "seqtab", "nonchim")
+rownames(track) <- sample.names
+
+#Look at track
+head(track)
+colSums(track)
+colSums(track)[ncol(track)]/colSums(track)[1]
+summary(track[,ncol(track)]) #summary of last column of track 
+
+#View taxa 
+taxa.print <- taxa #rmove sequence rownames for display only
+rownames(taxa.print) <- paste0("ASV",seq(length(rownames(taxa.print)))) #add ASV number - easier reference in analyses
+head(taxa.print)
+
 ```
+
+### Write CSV and fasta files
+
+```{r}
+
+dir.create("data/CSVs") #create subfile for data outputs
+
+#Create phyloseq object
+env <- data.frame(sample=(1:4), row.names = sample.names)
+row.names(seqtab.nochim) <- sample.names
+ps <- phyloseq(otu_table(seqtab.nochim, taxa_are_rows=FALSE), 
+               sample_data(env), 
+               tax_table(taxa))
+dna <- Biostrings::DNAStringSet(taxa_names(ps))
+names(dna) <- taxa_names(ps)
+ps <- merge_phyloseq(ps, dna)
+taxa_names(ps) <- paste0("ASV", seq(ntaxa(ps)))
+
+#
+rownames(taxa.print) <- paste0("ASV", seq(ntaxa(ps)))
+
+write.csv(taxa.print, "data/CSVs/taxa_16s.csv") #write csv
+
+#save an otu table
+otu <- as(otu_table(ps), "matrix")
+write.csv(otu,"data/CSVs/otu_16s.csv") #write csv
+
+#save a fasta file
+dir.create("data/fastas")
+
+#rep-set
+rep.set<- colnames(seqtab.nochim)
+names(rep.set) <- paste0("ASV",1:length(rep.set))
+writeFasta(object = rep.set, file = "data/fastas/rep-set.fasta")
+
+#re-replicate
+for(i in seq(nrow(seqtab.nochim))) {
+  ids <- paste0("s", i, "_", seq(rowSums(seqtab.nochim)[i]))
+  seqs.re_replicated <- rep(colnames(seqtab.nochim), times=seqtab.nochim[i,])
+  writeFasta(object = ShortRead(sread = DNAStringSet(seqs.re_replicated),
+                                id = BStringSet(ids)),
+             file = paste0("data/fastas/final", i,".fasta"), width = 20000)
+}
+
+```
+
+## Data Analysis and Visualization
+
+```{r}
+
+```
+
+

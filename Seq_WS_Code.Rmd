@@ -10,18 +10,11 @@ output:
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 
-```
-
-## Workshop Background
-
-This workshop given by Dr. Henry Birt for the Microbiome Network at the University of Manchester...
-
-## Processing Example Raw 16S Data to Analyze
-
-```{r}
 #install if needed
 #BiocManager::install("phyloseq")
 #BiocManager::install("DECIPHER")
+#BiocManager::install("microbiome")
+BiocManager::install("microbiome")
 
 #load libraries
 library(rlang)
@@ -31,6 +24,22 @@ library(tidyverse)
 library(phangorn)
 library(DECIPHER)
 library(phyloseq)
+library(vegan)
+library(microbiome)
+library(tidyverse)
+library(DescTools)
+library(emmeans)
+library(multcompView)
+
+```
+
+## Workshop Background
+
+This workshop given by Dr. Henry Birt for the Microbiome Network at the University of Manchester...
+
+## Processing Example Raw 16S Data to Analyze
+
+```{r}
 
 #download.file('https://mothur.s3.us-east-2.amazonaws.com/wiki/miseqsopdata.zip', destfile = "data/miseqsopdata.zip")
 #unzip("data/miseqsopdata.zip", exdir = "data/")
@@ -250,6 +259,144 @@ for(i in seq(nrow(seqtab.nochim))) {
 
 ```{r}
 
+#Load example dataset from "microbiome" package
+data("atlas1006")
+atlas1006
+otu.tmp <-  as.matrix(as.data.frame(as.matrix(otu_table(atlas1006))))
+env.all <- as(sample_data(atlas1006), "data.frame")
+otu.all <- t(otu.tmp)
+row.names(env.all) == row.names(otu.all)
+
+#subset for single time point
+env <-  env.all[which(env.all$time == 0),]
+otu <-  otu.all[which(env.all$time == 0),]
+
+#fill in data for nationality
+env$nationality  <- str_replace_na(env$nationality  , replacement = "other") %>%
+  as.factor()
+summary(env)
+
+#check library sizes
+lib.size <- rowSums(otu)
+hist(lib.size)
+summary(lib.size)
+
+otu.r <- rrarefy(otu,1900)
+
 ```
 
+### Alpha Diversity
 
+```{r, fig.cap="Histograms of data distribution for microbiome richness of multiple nationalities."}
+
+#Calculate alpha diversity metrics 
+env$sobs <-specnumber(otu.r) #calc richness
+env$gini <- apply(otu.r, 1, function(x) Gini(x)) #
+env$shannon <- diversity(t(otu.r), index = "shannon") #Shannon Index for Diversity - richness and evenness
+
+#Look at distribution
+par(mfrow=c(2, 4)) # Set up the plot layout to display 4 histograms in each of 2 rows
+
+sobs_by_nationality <- split(env$sobs, env$nationality) #split the data by sex - subobjects of an object
+
+for (nationality_level in levels(env$nationality)) {
+  hist(sobs_by_nationality[[nationality_level]], 
+       main = paste("Histogram for", nationality_level), 
+       xlab = "sobs",
+       col = "lightblue",
+       border = "black")
+}
+
+```
+
+```{r, fig.cap="Residuals of microbiome richness and their fit to expected values."}
+
+#Examine residuals
+par(mfrow=c(1, 1))
+mod <- lm(sobs~nationality,data = env)
+plot(mod$residuals)
+qqnorm(residuals(mod),
+       ylab="Sample Quantiles for residuals")
+qqline(residuals(mod),
+       col="red")
+anova(mod)
+
+```
+
+```{r, fig.cap="Boxplot of microbiome richness by nationality."}
+
+#Boxplot data
+ggplot(env, aes(fill=nationality ,x=nationality, y=sobs))+
+  geom_boxplot(coef = Inf)+
+  geom_jitter(shape=16, position=position_jitter(0.1), size = 0.85)+ #data points
+  ylab("Diversity (Observed Species)")+
+  xlab("Sampling time")+
+  annotate("text", x = 1, y =120, label = "A", fontface =2)+
+  annotate("text", x = 2, y =120, label = "B", fontface =2)+
+  annotate("text", x = 3, y =120, label = "A", fontface =2)+
+  annotate("text", x = 4, y =120, label = "C", fontface =2)+
+  annotate("text", x = 5, y =120, label = "AC", fontface =2)+
+  annotate("text", x = 6, y =120, label = "C", fontface =2)+
+  annotate("text", x = 7, y =120, label = "A", fontface =2)+
+  theme(axis.line = element_line(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        axis.text.x = element_text(angle = 30, hjust = 1),
+        legend.position = 0)
+
+#Posthoc test
+mod.pairwise <- as.data.frame(emmeans(mod,pairwise ~nationality, adjust  = "BH")$contrasts)
+mod.pairwise.p <- mod.pairwise$p.value 
+names(mod.pairwise.p) <- str_replace(mod.pairwise[,1]," - ","-")
+mod.pairwise.p.letters <- multcompLetters(mod.pairwise.p)
+mod.pairwise.p.letters 
+
+
+```
+### Beta Diversity
+
+```{r, fig.cap="Bray."}
+
+#check beta disper
+otu.r.bray <- vegdist(otu.r)
+otu.r.euc <- vegdist(sqrt(otu.r), method = "euc")
+
+mod <- betadisper(otu.r.bray, env$nationality, type = "centroid")
+permutest(mod, permutations = 999)
+
+mod <- betadisper(otu.r.euc, env$nationality, type = "centroid")
+permutest(mod, permutations = 999)
+
+
+adonis2(otu.r~nationality, method = "bray", data = env)
+adonis2(sqrt(otu.r)~nationality, method = "euc", data = env)
+
+# Running NMDS in vegan (metaMDS)
+#maximum likelihood
+otu.r.bray_NMS <-
+  metaMDS(otu.r,
+          distance = "bray",
+          k = 3,
+          maxit = 999, 
+          trymax = 30,
+          wascores = TRUE)
+
+
+stressplot(otu.r.bray_NMS)
+
+plot(otu.r.bray_NMS , dis="sites",type="n", xlab = "NMDS1", ylab = "NMDS2")
+ordiellipse(otu.r.bray_NMS, env$nationality, kind="sd",lwd=2.5, lty = 1, col="#47a144ff", show.groups = "CentralEurope")
+ordiellipse(otu.r.bray_NMS, env$nationality, kind="sd",lwd=2.5, lty = 1, col="#ce1719ff", show.groups = "EasternEurope")
+ordiellipse(otu.r.bray_NMS, env$nationality, kind="sd",lwd=2.5, lty = 1, col="#1f78b4", show.groups = "other")
+ordiellipse(otu.r.bray_NMS, env$nationality, kind="sd",lwd=2.5, lty = 1, col="#ff7f00", show.groups = "Scandinavia")
+ordiellipse(otu.r.bray_NMS, env$nationality, kind="sd",lwd=2.5, lty = 1, col="#6a3d9a", show.groups = "SouthEurope")
+ordiellipse(otu.r.bray_NMS, env$nationality, kind="sd",lwd=2.5, lty = 1, col="#ffff99", show.groups = "UKIE")
+ordiellipse(otu.r.bray_NMS, env$nationality, kind="sd",lwd=2.5, lty = 1, col="#b15928", show.groups = "US")
+points(otu.r.bray_NMS, dis='sites',pch=21,bg=env$nationality, col="#000000", cex=1.5)
+legend("topleft",legend=unique(env$nationality),pch=19,col=unique(env$nationality))
+
+#pairwise tests (computationally intense)
+#pairwise.adonis(otu.r.bray,factors = env$nationality,p.adjust.m='BH')
+
+```

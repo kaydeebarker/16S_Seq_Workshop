@@ -2,9 +2,12 @@
 title: "Amplicon Sequencing Workshop with Dr. Henry Birt"
 author: "Kaydee S. Barker"
 date: '2023-05-02'
-output:
-  pdf_document: default
-  html_document: default
+  pdf_document:
+    toc: yes
+  html_document:
+    toc: yes
+    toc_float: yes
+
 ---
 
 ```{r setup, include=FALSE}
@@ -14,7 +17,7 @@ knitr::opts_chunk$set(echo = TRUE)
 #BiocManager::install("phyloseq")
 #BiocManager::install("DECIPHER")
 #BiocManager::install("microbiome")
-BiocManager::install("microbiome")
+#BiocManager::install("microbiome")
 
 #load libraries
 library(rlang)
@@ -35,11 +38,13 @@ library(multcompView)
 
 ## Workshop Background
 
-This workshop given by Dr. Henry Birt for the Microbiome Network at the University of Manchester...
+This workshop, given by [Dr. Henry Birt](https://research.manchester.ac.uk/en/persons/henry.birt) for the Microbiome Network at the University of Manchester, covered the basics for processing 16S amplicon data using [DADA2](https://benjjneb.github.io/dada2/). This data targets the 16S rRNA genome region in order to identify and compare phylogeny of bacteria and archaea. It is a high-throughput way to survey "who is there" and "how abundant are they" in a given sample or group of samples. The data used in this project is from the [Mothur Project](https://mothur.org/), the [Illumina Database](https://emea.illumina.com/), and the [Microbiome Package](https://microbiome.github.io/tutorials/) in R.
 
 ## Processing Example Raw 16S Data to Analyze
 
 ```{r}
+
+#Pull data from Mothur 
 
 #download.file('https://mothur.s3.us-east-2.amazonaws.com/wiki/miseqsopdata.zip', destfile = "data/miseqsopdata.zip")
 #unzip("data/miseqsopdata.zip", exdir = "data/")
@@ -51,7 +56,7 @@ files <- list.files("data/MiSeq_SOP/")
 num.files <- length(list.files("data/MiSeq_SOP/"))
 
 #trim to four forward and reverse reads
-unlink(paste0(path,files[9:num.files]))
+#unlink(paste0(path,files[9:num.files])) #delete all but first 8 files
 
 #Get full paths for all files and save them for downstream analyses
 #Forward and reverse fastq filenames have format: 
@@ -118,7 +123,7 @@ plotQualityProfile(fl = filtRs)
 
 #### Identify errors
 
-```{r, fig.cap="Scatterplot and line for expected and actual reads for forward reads. The black line shows the estimated error rates after convergence of the machine-learning algorithm. The red line shows the error rates expected under the nominal definition of the Q-score."}
+```{r, fig.cap="Scatterplot and line for expected and actual error frequencies for forward reads. The black line shows the estimated error rates after convergence of the machine-learning algorithm. The red line shows the error rates expected under the nominal definition of the Q-score."}
 
 errF <- learnErrors(filtFs, nbases = 1e8, multithread = TRUE)
 
@@ -126,7 +131,7 @@ plotErrors(errF, nominalQ = TRUE)
 
 ```
 
-```{r, fig.cap="Scatterplot and line for expected and actual reads for reverse reads."}
+```{r, fig.cap="Scatterplot and line for expected and actual error frequencies for reverse reads."}
 
 errR <- learnErrors(filtRs, nbases = 1e8, multithread = TRUE)
 
@@ -214,7 +219,7 @@ head(taxa.print)
 
 ```{r}
 
-dir.create("data/CSVs") #create subfile for data outputs
+#dir.create("data/CSVs") #create subfile for data outputs
 
 #Create phyloseq object
 env <- data.frame(sample=(1:4), row.names = sample.names)
@@ -230,28 +235,28 @@ taxa_names(ps) <- paste0("ASV", seq(ntaxa(ps)))
 #
 rownames(taxa.print) <- paste0("ASV", seq(ntaxa(ps)))
 
-write.csv(taxa.print, "data/CSVs/taxa_16s.csv") #write csv
+#write.csv(taxa.print, "data/CSVs/taxa_16s.csv") #write csv
 
 #save an otu table
 otu <- as(otu_table(ps), "matrix")
 write.csv(otu,"data/CSVs/otu_16s.csv") #write csv
 
 #save a fasta file
-dir.create("data/fastas")
+#dir.create("data/fastas")
 
 #rep-set
 rep.set<- colnames(seqtab.nochim)
 names(rep.set) <- paste0("ASV",1:length(rep.set))
-writeFasta(object = rep.set, file = "data/fastas/rep-set.fasta")
+#writeFasta(object = rep.set, file = "data/fastas/rep-set.fasta")
 
 #re-replicate
-for(i in seq(nrow(seqtab.nochim))) {
-  ids <- paste0("s", i, "_", seq(rowSums(seqtab.nochim)[i]))
-  seqs.re_replicated <- rep(colnames(seqtab.nochim), times=seqtab.nochim[i,])
-  writeFasta(object = ShortRead(sread = DNAStringSet(seqs.re_replicated),
-                                id = BStringSet(ids)),
-             file = paste0("data/fastas/final", i,".fasta"), width = 20000)
-}
+#for(i in seq(nrow(seqtab.nochim))) {
+#  ids <- paste0("s", i, "_", seq(rowSums(seqtab.nochim)[i]))
+#  seqs.re_replicated <- rep(colnames(seqtab.nochim), times=seqtab.nochim[i,])
+#  writeFasta(object = ShortRead(sread = DNAStringSet(seqs.re_replicated),
+#                                id = BStringSet(ids)),
+#             file = paste0("data/fastas/final", i,".fasta"), width = 20000)
+#}
 
 ```
 
@@ -291,7 +296,7 @@ otu.r <- rrarefy(otu,1900)
 
 #Calculate alpha diversity metrics 
 env$sobs <-specnumber(otu.r) #calc richness
-env$gini <- apply(otu.r, 1, function(x) Gini(x)) #
+env$gini <- apply(otu.r, 1, function(x) Gini(x)) #Gini coefficient
 env$shannon <- diversity(t(otu.r), index = "shannon") #Shannon Index for Diversity - richness and evenness
 
 #Look at distribution
@@ -356,7 +361,7 @@ mod.pairwise.p.letters
 ```
 ### Beta Diversity
 
-```{r, fig.cap="Bray."}
+```{r}
 
 #check beta disper
 otu.r.bray <- vegdist(otu.r)
@@ -384,6 +389,10 @@ otu.r.bray_NMS <-
 
 
 stressplot(otu.r.bray_NMS)
+
+```
+
+```{r, fig.cap="NMDS plot"}
 
 plot(otu.r.bray_NMS , dis="sites",type="n", xlab = "NMDS1", ylab = "NMDS2")
 ordiellipse(otu.r.bray_NMS, env$nationality, kind="sd",lwd=2.5, lty = 1, col="#47a144ff", show.groups = "CentralEurope")

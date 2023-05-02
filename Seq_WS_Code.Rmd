@@ -1,0 +1,41 @@
+---
+title: "16S Sequencing Workshop with Dr. Henry Birt"
+author: "Kaydee S. Barker"
+date: '2023-05-02'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Workshop
+
+This workshop given by Dr. Henry Birt for the Microbiome Network at the University of Manchester...
+
+```{r setup}
+#install if needed
+#BiocManager::install("phyloseq")
+#BiocManager::install("DECIPHER")
+
+#load libraries
+library(rlang)
+library(dada2)
+library(ShortRead)
+library(tidyverse)
+library(phangorn)
+library(DECIPHER)
+library(phyloseq)
+
+download.file('https://mothur.s3.us-east-2.amazonaws.com/wiki/miseqsopdata.zip', destfile = "data/miseqsopdata.zip")
+unzip("data/miseqsopdata.zip", exdir = "data/")
+
+```
+
+## 
+
+```{r}
+
+
+
+```

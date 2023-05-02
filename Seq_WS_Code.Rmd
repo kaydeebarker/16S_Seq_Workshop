@@ -1,5 +1,5 @@
 ---
-title: "16S Amplicon Sequencing Workshop with Dr. Henry Birt"
+title: "Amplicon Sequencing Workshop with Dr. Henry Birt"
 author: "Kaydee S. Barker"
 date: '2023-05-02'
 output:
@@ -16,7 +16,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 This workshop given by Dr. Henry Birt for the Microbiome Network at the University of Manchester...
 
-## Processing Raw Data to Analyze
+## Processing Example Raw 16S Data to Analyze
 
 ```{r}
 #install if needed

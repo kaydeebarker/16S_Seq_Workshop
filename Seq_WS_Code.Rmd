@@ -1,5 +1,5 @@
 ---
-title: "16S Sequencing Workshop with Dr. Henry Birt"
+title: "16S Amplicon Sequencing Workshop with Dr. Henry Birt"
 author: "Kaydee S. Barker"
 date: '2023-05-02'
 output: html_document
@@ -30,12 +30,146 @@ library(phyloseq)
 download.file('https://mothur.s3.us-east-2.amazonaws.com/wiki/miseqsopdata.zip', destfile = "data/miseqsopdata.zip")
 unzip("data/miseqsopdata.zip", exdir = "data/")
 
+path <- "data/MiSeq_SOP/"
+files <- list.files("data/MiSeq_SOP/")
+#files
+
+num.files <- length(list.files("data/MiSeq_SOP/"))
+
+#trim to four forward and reverse reads
+unlink(paste0(path,files[9:num.files]))
+
+#Get full paths for all files and save them for downstream analyses
+#Forward and reverse fastq filenames have format: 
+fnFs <- sort(list.files(path, pattern="R1_", full.names = TRUE)) #forward read
+fnRs <- sort(list.files(path, pattern="R2_", full.names = TRUE)) #reverse read
+
+#Get sample names
+sample.names <- sapply(strsplit(basename(fnFs), "R1_"), function(x) x[1])
+sample.names <- str_split(string = sample.names, pattern = "_", simplify = T )[,1]
+
+#Create file pathway to place filtered files in filtered/ subdirectory
+filtFs <- file.path(path, "filtered", paste0(sample.names, "_F_filt.fastq.gz")) 
+filtRs <- file.path(path, "filtered", paste0(sample.names, "_R_filt.fastq.gz"))
+names(filtFs) <- sample.names
+names(filtRs) <- sample.names
+
+
 ```
 
-## 
+## Read quality profiles
+
+### Inspect the front and reverse read quality profiles
+
+```{r, fig.cap="Heat map of the frequency of each quality score at each base position in forward reads. The mean quality score at each position is shown by the green line,and the quartiles of the quality score distribution by the orange lines. The red line shows the scaled proportion of reads that extend to at least that position."}
+
+#Plot read quality profile
+plotQualityProfile(fl = fnFs)
+
+```
+
+```{r, fig.cap="Heat map of the frequency of each quality score at each base position in reverse reads."}
+
+#Plot read quality profile
+plotQualityProfile(fl = fnRs)
+
+```
+
+### Filter and trim, then inspect read quality profiles again
+
+Here we will trim off data with a quality score less than 20.
+
+```{r, fig.cap="Heat map of the frequency of each quality score at each base position in forward reads for the trimmed data."}
+#filter and trim
+out <- filterAndTrim(fnFs, filtFs, fnRs, filtRs, #file path of original data, file path of filtered data for each
+                     truncLen = c(240,160), #select the first 240 forward reads and 160 reverse reads
+                     trimLeft = c(15,15), #trim off the primers for analysis (first 15 reads of each)
+                     maxN=0, #remove any sequences that have 'N' which is an error
+                     maxEE=c(2,2), #set threshold for expected error scores for forward and reverse
+                     truncQ=2, #trim after first instance of truncQ quality score of 2
+                     rm.phix=TRUE, compress=TRUE, multithread=FALSE) #on Windows set multithread=FALSE
+head(out)
+
+#Plot read quality profile
+plotQualityProfile(fl = filtFs)
+
+```
+
+```{r, fig.cap="Heat map of the frequency of each quality score at each base position in reverse reads for the trimmed data."}
+
+#Plot read quality profile
+plotQualityProfile(fl = filtRs)
+
+```
+
+### Identify errors
+
+```{r, fig.cap="Scatterplot and line for expected and actual reads for forward reads. The black line shows the estimated error rates after convergence of the machine-learning algorithm. The red line shows the error rates expected under the nominal definition of the Q-score."}
+
+errF <- learnErrors(filtFs, nbases = 1e8, multithread = TRUE)
+
+plotErrors(errF, nominalQ = TRUE)
+
+```
+
+```{r, fig.cap="Scatterplot and line for expected and actual reads for reverse reads."}
+
+errR <- learnErrors(filtRs, nbases = 1e8, multithread = TRUE)
+
+plotErrors(errR, nominalQ = TRUE)
+
+```
+## Sample inference
+
+DADA2 uses a machine learning algorithm to infer unique sequences, or amplicon sequence variants (ASVs) from reads.
 
 ```{r}
 
+#apply the core sample inference algorithm to the filtered and trimmed sequence data.
+dadaFs <- dada(filtFs, err = errF, multithread = TRUE) #may want to consider pool = TRUE
+dadaRs <- dada(filtRs, err = errR, multithread = TRUE)
 
 
+```
+
+## Merge forward and reverse reads
+
+```{r}
+
+#Merge 
+mergers <- mergePairs(dadaFs, filtFs, dadaRs, filtRs, #file path of ASV inference, file path of filtered data for each
+                      verbose=TRUE, returnRejects = T)
+
+#Inspect the merger dataframe from the first sample
+head(mergers[[1]])
+
+#Create a matrix of ASV counts
+seqtab_orig <- makeSequenceTable(mergers)
+dim(seqtab_orig)
+
+#Create a table with average read length of ASVs
+table(nchar(getSequences(seqtab_orig)))
+nchar(colnames(seqtab_orig)) #show number of characters in each column
+seqtab <- seqtab_orig[,nchar(colnames(seqtab_orig)) == 225] #keep only columns with 225
+dim(seqtab) #look at dimensions of df
+
+
+```
+
+## Remove chimeras and assign taxonomy
+
+```{r}
+
+#Remove chimeras
+seqtab.nochim <- removeBimeraDenovo(seqtab, method="consensus", multithread=TRUE, verbose=TRUE)
+dim(seqtab.nochim) #look at dimensions of df
+
+#Download Silva reference database
+#download.file("https://zenodo.org/record/4587955/files/silva_nr99_v138.1_train_set.fa.gz?download=1", destfile = file.path(path, "silva_nr99_v138.1_train_set.fa.gz"), method = "libcurl")
+
+# implements the RDP Naive Bayesian Classifier algorithm described in Wang et al. Applied and Environmental Microbiology 2007, 
+taxa <- assignTaxonomy(seqtab.nochim, "silva_nr99_v138.1_train_set.fa.gz", multithread=TRUE) 
+dim(seqtab.nochim) #look at dimensions of df
+
+taxa
 ```
